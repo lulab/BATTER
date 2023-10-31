@@ -9,7 +9,7 @@
 
 - the following python packages are required
   - [pytorch](https://pytorch.org/): test on version `1.7.0+cu110`, other version should work
-  - [transformers](https://huggingface.co/docs/transformers/index): test on version `4.18.0`
+  - [transformers](https://huggingface.co/docs/transformers/index): version 4.18.0`
   - [pyfaidx](https://pythonhosted.org/pyfaidx/): test on version `0.7.1`
   - [numpy](https://numpy.org/)
 
