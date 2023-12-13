@@ -1,11 +1,11 @@
-# batter
+# BATTER
 
-- batter (**ba**cteria **t**ranscript **t**hree prime **e**nd **r**ecognizer) is a tool for bacteria transcription terminator prediction based on BERT-CRF model. 
-- It aims to predict both rho dependent and rho independent terminator across diverse species in Bacteria domain.
+- BATTER (**BA**cteria **T**ranscript **T**hree prime **E**nd **R**ecognizer) is a tool for bacteria transcription terminator prediction based on BERT-CRF model. 
+- It was designed to predict both rho dependent and rho independent terminator across diverse species in Bacteria domain.
 
 ## Installation
 
-### dependency
+### Dependency
 
 - The following python packages are required:
   - [pytorch](https://pytorch.org/): test on version `1.7.0+cu110`, other version should work
@@ -41,24 +41,24 @@ mamba install -c bioconda bedtools
 
 ### Installation
 
-- Simply clone this repo:
+- After installing the dependencies, you can install BATTER by simply cloning this repo:
 
 ```bash
 git clone https://github.com/uaauaguga/batter.git 
 ```
 
-## usage
+## Usage
 
-- `batter` takes bacteria genome sequence (can be contig or complete/draft genome) as input, and produces predicted terminator coordinate and strand information with confidence scores in bed format
+- `BATTER` takes bacteria genome sequence (can be contig or complete/draft genome) as input, and produces predicted terminator coordinate and strand information with confidence scores in bed format
 
 ### Inference
 
 - Here we take scanning S.aureus genome [GCF_000013425.1](https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/013/425/GCF_000013425.1_ASM1342v1/) as an example. 
 
-- batter scans top strand by default, for genome scanning, searching both top and bottom strand is desired, here we use `--reverse-complement`/`-rc` option. The following command takes around 2 min to finish on a nvidia V100 GPU.
+- BATTER scans top strand by default, for genome scanning, searching both top and bottom strand is desired, here we use `--reverse-complement`/`-rc` option. The following command takes around 2 min to finish on a nvidia V100 GPU.
 
 ```bash
-# the default batch size if 256. If the GPU memory is limitted, plase use a smaller batch size, eg. 64
+# The default batch size if 256. If the GPU memory is limitted, plase use a smaller batch size, eg. 64
 scripts/batter --fasta examples/S.aureus/genome.fna --output examples/S.aureus.bed --device cuda:0 -rc
 ```
 
@@ -71,13 +71,13 @@ scripts/batter --fasta examples/S.aureus/genome.fna --output examples/S.aureus.b
   - field 5: strand
 
  
-- if you want to keep temperorary file, use `--keep-temp`/`-kt` option. You can also specify path of temporary file with parameter `--tmp-file`
+- If you want to keep temperorary file, use `--keep-temp`/`-kt` option. You can also specify path of temporary file with parameter `--tmp-file`
  
 ```bash
  scripts/batter --fasta examples/S.aureus/genome.fna --output examples/S.aureus.bed --device cuda:0 -rc -kt
 ```
 
-- if more efficient scanning (at cost of lower sensitivity) is desired, you can increase the step size (100 nt by default) for scanning 
+- If more efficient scanning (at cost of lower sensitivity) is desired, you can increase the step size (100 nt by default) for scanning 
 
 ```bash
  # the following command take ~1 min on a V100 GPU, but produce less prediction
