@@ -163,3 +163,7 @@ NC_007795.1	9663	9715	.	0.894	+	genic	0	concordant	gene:3'	cds-YP_498614.1
 # 9: location relative to CDS, one of leader, downstream, genic, or intergenic
 # 10: id of upstream gene and downstream gene
 ```
+
+## Citation
+
+Yunfan, J., et al., BATTER: Accurate Prediction of Rho-dependent and Rho-independent Transcription Terminators in Metagenomes. bioRxiv, 2023: p. 2023.10.02.560326.
