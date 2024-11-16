@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import argparse
 import numpy as np
+import os
+import pandas as pd
 import logging
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(name)s] %(message)s')
 logger = logging.getLogger("select intervals")
@@ -22,13 +24,23 @@ def merge_intervals(cached_scores, cached_ivs):
         iv_by_strand[strand] = cached_iv_by_strand[strand][i]
     return score_by_strand, iv_by_strand
 
+exedir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 
 def main():
     parser = argparse.ArgumentParser(description='pick best interval from overlapped ones')
     parser.add_argument('--input', '-i',required=True,help="input intervals")
     parser.add_argument('--output','-o',required=True,help="output intervals")
+    parser.add_argument('--lookup','-l',required=True,help="bin lookup")
+    parser.add_argument('--fprs','-f',default="model/TPE-FPR-by-clusters.txt",help="fprs lookup table")
     args = parser.parse_args()
 
+    logger.info("Load FPR table ...")
+    fprs = pd.read_csv(os.path.join(exedir,args.fprs),sep="\t",index_col=0)
+    lut = {}
+    with open(args.lookup) as f:
+        for line in f:
+            seq_id, binidx = line.strip().split("\t")
+            lut[seq_id] = binidx
 
     logger.info(f"load intervals from {args.input} ...")
     logger.info(f"picked intervals will be saved to {args.output} .")
@@ -38,6 +50,7 @@ def main():
     fout = open(args.output,"w")
     cached_ivs = []
     cached_scores = []
+    idx = 0
     for line in fin:
         seq_id, start, end, _, scores, strand = line.strip().split("\t")
         start, end = int(start), int(end)
@@ -54,7 +67,14 @@ def main():
                         continue
                     mseq_id, mstart, mend  = iv_by_strand[mstrand]
                     mscore = score_by_strand[mstrand]
-                    print(mseq_id, mstart, mend, ".", round(mscore,3), mstrand, file=fout, sep="\t")
+                    mscore = round(mscore,3)
+                    level = int(mscore*1000)
+                    if level >= 486:                 
+                        fpr = round(fprs.loc[level,lut[mseq_id]],5)  
+                    else:
+                        fpr = np.nan
+                    print(mseq_id, mstart, mend, "TPE" + str(idx).zfill(8), mscore, mstrand, fpr, file=fout, sep="\t")
+                    idx += 1
                 # update the cache
                 cached_ivs, cached_scores = [], []
         cached_ivs.append((seq_id, start, end, strand))
@@ -68,7 +88,13 @@ def main():
                 continue
             mseq_id, mstart, mend = iv_by_strand[mstrand]
             mscore = score_by_strand[strand]
-            print(mseq_id, mstart, mend, ".", round(mscore,3), mstrand, file=fout, sep="\t")
+            mscore = round(mscore,3)
+            level = int(mscore*1000)
+            if level >= 486:
+                fpr = round(fprs.loc[level,lut[mseq_id]],5)
+            else:
+                fpr = np.nan
+            print(mseq_id, mstart, mend, "TPE" + str(idx).zfill(8), mscore, mstrand, fpr, file=fout, sep="\t")
     fin.close()
     fout.close()
 

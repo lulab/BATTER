@@ -8,12 +8,13 @@
 ### Dependency
 
 - The following python packages are required:
+  - [numpy](https://numpy.org/)
+  - [pandas](https://pandas.pydata.org/)
   - [pytorch](https://pytorch.org/): test on version `1.7.0+cu110`, other version should work
   - [transformers](https://huggingface.co/docs/transformers/index): version `4.18.0`
   - [pyfaidx](https://pythonhosted.org/pyfaidx/): test on version `0.7.1`
 
 - The following tools are optional:
-  - [lightgbm](https://lightgbm.readthedocs.io/), for predicting score cutoff given tetra-mer frequency
   - [bedtools](https://bedtools.readthedocs.io/), for evaluating genomic distribution of predicted terminator
 
 - We recommend using [miniforge](https://github.com/conda-forge/miniforge) to install the dependency. 
@@ -30,12 +31,12 @@ mamba activate batter-env
 
 ```bash
 # install required packages:
+mamba install  -c conda-forge numpy pandas
 mamba install -c pytorch pytorch==1.7.0
 mamba install -c conda-forge transformers==4.18.0
 mamba install -c bioconda pyfaidx==0.7.1
 
-# install optional packages if you need them:
-mamba install -c conda-forge lightgbm
+# install optional packages if you need it:
 mamba install -c bioconda bedtools
 ```
 
@@ -49,9 +50,11 @@ git clone https://github.com/uaauaguga/batter.git
 
 ## Usage
 
-- `BATTER` takes bacteria genome sequence (can be contig or complete/draft genome) as input, and produces predicted terminator coordinate and strand information with confidence scores in bed format
+- BATTER contains two modules:
+  - batter-tpe: prediction transcript 3' ends
+  - batter-rut: predict putative rho utilization (RUT) sites
 
-### Inference
+### Predict transcript 3' ends
 
 - Here we take scanning S.aureus genome [GCF_000013425.1](https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/013/425/GCF_000013425.1_ASM1342v1/) as an example. 
 
@@ -59,7 +62,7 @@ git clone https://github.com/uaauaguga/batter.git
 
 ```bash
 # The default batch size if 256. If the GPU memory is limitted, plase use a smaller batch size, eg. 64
-scripts/batter --fasta examples/S.aureus/genome.fna --output examples/S.aureus.bed --device cuda:0 -rc
+scripts/batter-tpe --fasta examples/S.aureus/genome.fna --output examples/S.aureus.bed --device cuda:0 
 ```
 
 - The output is in bed format
@@ -74,14 +77,14 @@ scripts/batter --fasta examples/S.aureus/genome.fna --output examples/S.aureus.b
 - If you want to keep temperorary file, use `--keep-temp`/`-kt` option. You can also specify path of temporary file with parameter `--tmp-file`
  
 ```bash
- scripts/batter --fasta examples/S.aureus/genome.fna --output examples/S.aureus.bed --device cuda:0 -rc -kt
+ scripts/batter-tpe --fasta examples/S.aureus/genome.fna --output examples/S.aureus.bed --device cuda:0 -rc -kt
 ```
 
 - If more efficient scanning (at cost of lower sensitivity) is desired, you can increase the step size (100 nt by default) for scanning 
 
 ```bash
  # the following command take ~1 min on a V100 GPU, but produce less prediction
- scripts/batter --fasta examples/S.aureus/genome.fna --output examples/S.aureus.250.bed --device cuda:0 -rc --stride 250
+ scripts/batter-tpe --fasta examples/S.aureus/genome.fna --output examples/S.aureus.250.bed --device cuda:0 -rc --stride 250
 ```
 
 ### Model calibration
