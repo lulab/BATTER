@@ -9,7 +9,7 @@
   - For RIT, rho independent terminator itself serve as this protective stem loop, which marks the transcript 3' end.
   - For RDT, RUT site, where transcription termination actually happens, often locates at downstream of transcript 3' ends marked by the protective stem loop.  
   - **The prediction of primary transcript 3' ends is a easier task**.
-![relation of RUT, 3' ends and stem loop](./imgs/RIT-RDT.png =400x400)
+![relation of RUT, 3' ends and stem loop](./imgs/RIT-RDT.png=400x400)
 
 ### When to use BATTER
 - BATTER (**BA**cteria **T**ranscript **T**hree prime **E**nd **R**ecognizer) is a tool for bacteria transcription termination prediction, it was designed to predict 3' ends of primary transcript (both RIT and RDT) across diverse species in bacteria domain. 
