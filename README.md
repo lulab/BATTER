@@ -123,6 +123,7 @@ sort -k1,1 -k2,2n -o examples/e.coli/genes.bed examples/e.coli/genes.bed
 ``` 
 - Annotate predicted terminators with protein coding genes
 ![annotation by genomic context](./imgs/annotation.png)
+<img src="./imgs/annotation.png" width="600px">
 ```bash
 scripts/annotate-intervals.py --gene examples/e.coli/genes.bed --bed examples/e.coli/TPE.bed --contig examples/e.coli/genome.fna.fai --output examples/e.coli/TPE.annotated.bed
 scripts/annotate-intervals.py --gene examples/e.coli/genes.bed --bed examples/e.coli/TPE.RUT.bed --contig examples/e.coli/genome.fna.fai --output examples/e.coli/TPE.RUT.annotated.bed
