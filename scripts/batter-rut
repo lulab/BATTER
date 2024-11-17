@@ -41,7 +41,8 @@ def main():
     parser = argparse.ArgumentParser(description='Genome wide prediction of rho binding sites')
     parser.add_argument('--input','-i',type=str,required=True, help='input genomic sequences')
     parser.add_argument('--intervals','-ivs',type=str, help='input intervals to consider')
-    parser.add_argument('--slop',type=int, default=100, help='slop input intervals')
+    parser.add_argument('--left-slop',type=int, default=100, help='input intervals at left side')
+    parser.add_argument('--right-slop',type=int, default=100, help='input intervals at right side')
     parser.add_argument('--output','-o',type=str, required=True, help = 'output predictions')
     parser.add_argument('--stride','-s',type=int, default=40, help = 'stride size')
     parser.add_argument('--window','-w',type=int, default=100, help = 'window size')
@@ -97,8 +98,12 @@ def main():
                 strand = fields[5]
                 if seq_id not in intervals:
                     intervals[seq_id] = []
-                start -= args.slop
-                end += args.slop
+                if strand == "+":
+                    start -= args.left_slop
+                    end += args.right_slop
+                else:
+                    start -= args.right_slop
+                    end += args.left_slop
                 start = max(0,start)
                 end = min(len(fasta[seq_id]),end)
                 intervals[seq_id].append((start,end,strand))
@@ -114,16 +119,20 @@ def main():
     # current index of the terminator
     rdt_index = 0
     cached_ivs = set()
-    
+
+    nregions = 0    
     nbases = 0
     for seq_id in intervals:
         logger.info(f"Processing {seq_id} ...")
         sequence = fasta[seq_id]
         for region_start, region_end, region_strand in intervals[seq_id]:
+            nregions += 1
+            if (args.intervals is not None) and ((nregions+1)%500 == 0):
+                logger.info(f"{(nregions+1)/1000} K regions processed .")
             p = region_start
             while p + args.window < region_end:
-                if ((nbases + 1)/400000 == 0):
-                    logger.info(f"{(p + 1)/1000000} M bases processed .")
+                if (args.intervals is None) and ((nbases + 1)/100000 == 0):
+                    logger.info(f"{(nbases + 1)/1000000} M bases processed .")
                 segment = sequence[p:p+args.window]
                 segment = str(segment).replace("T","U")
                 # select candidates with beam search

@@ -9,9 +9,9 @@ logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(
 logger = logging.getLogger('annotate intervals')
 
 def main():
-    parser = argparse.ArgumentParser(description='annotate intervals according to genome annotatioon')
+    parser = argparse.ArgumentParser(description='annotate intervals according to genome annotation')
     parser.add_argument('--gene','-g',type=str, required=True, help='gene interval in bed format, strandness is required')
-    parser.add_argument('--bed','-b',type=str, required=True, help="intervals in bed format")
+    parser.add_argument('--bed','-b',type=str, required=True, help="ncRNA intervals in bed format")
     parser.add_argument('--output','-o',type=str, required=True, help="where to save the annotations")
     parser.add_argument('--contig', '-c', type=str, required=True, help="contig length")
     parser.add_argument('--offset', '-os', type=int, default = 32, help="distance inside CDS that are assigned as 5'/3'")
@@ -28,6 +28,7 @@ def main():
         for line in f:
             fields = line.strip().split("\t")
             seq_id, start, end, name, score, strand = fields[:6]
+            start, end = int(start), int(end)
             if strand == ".":
                 continue
             if (seq_id, start, end) not in scores:
@@ -37,6 +38,15 @@ def main():
             else:
                 antisense_scores[(seq_id, start, end)] = score
                 antisense_names[(seq_id, start, end)] = name
+    
+    logger.info("Load gene intervals ...")
+    CDSs = {}
+    with open(args.gene) as f:
+        for line in f:
+            fields = line.strip().split("\t")
+            seq_id, start, end, name, score, strand = fields[:6]
+            CDSs[name] = (seq_id, int(start), int(end), strand)
+
 
     up_distance = {}
     up_strandness = {}
@@ -77,11 +87,11 @@ def main():
             continue
         fields = line.strip().split("\t")
         seq_id, start, end = fields[:3]
+        start, end = int(start), int(end)
         distance = int(fields[-1])
         up_distance[(seq_id, start, end)] = distance
         # for features that overlap with cds, we only need to consider it ones
         if distance == 0:
-            # NC_004719.1	61486	61508	NC_004719.1	61467	62430	WP_011109717.1	.	+	0
             tstart, tend = int(start), int(end) 
             gstart, gend = int(fields[4]), int(fields[5])
             if fields[-2] == "+":
@@ -123,6 +133,7 @@ def main():
             continue
         fields = line.strip().split("\t")
         seq_id, start, end = fields[:3]
+        start, end = int(start), int(end)
         # genic cases is already handled
         down_distance[(seq_id, start, end)] = int(fields[-1])
         down_strandness[(seq_id, start, end)] = fields[-2]
@@ -131,6 +142,7 @@ def main():
 
     proc.stdin.close()
     proc.wait()
+
 
     # 3*3 = 9 cases
     annotation_lut = {"++":">|>", "+-":">|<","+.":">|.",
@@ -147,16 +159,29 @@ def main():
         if (down_gene_ids[(seq_id, start, end)] == ".") and (dd == -1):
             dd = np.inf
         ud, dd = abs(ud), abs(dd)
-        if ud == 0 or dd == 0 :
+        if ud == 0 or dd == 0:
             # genic
             distance = 0
             annotation = "genic"
             gene_id = up_gene_ids[(seq_id, start, end)] if ud < 0 else down_gene_ids[(seq_id, start, end)]
+            CDS_start, CDS_end = CDSs[gene_id][1], CDSs[gene_id][2]            
+            if start < CDS_start:
+                if end < CDS_end:            
+                    overlap = end - CDS_start
+                else:
+                    overlap = CDS_end - CDS_start
+            else:
+                if end < CDS_end:
+                    overlap = end - start
+                else:
+                    overlap = CDS_end - start                
+            overlap = round(overlap/(end-start),3)
         else:
             # intergenic
             annotation = annotation_lut[us+ds]
             gene_id = f"{up_gene_ids[(seq_id, start, end)]}|{down_gene_ids[(seq_id, start, end)]}"
             distance = f"{ud},{dd}"
+            overlap = 0
         s = strandness[(seq_id, start, end)]
         if annotation == "genic":
             assert us == ds
@@ -207,13 +232,14 @@ def main():
                 else:
                     assignment = "unassigned"
                     conflict = "unknown"
+        
         print(seq_id, start, end,
               names[(seq_id, start, end)], scores[(seq_id, start, end)], s, 
-              annotation, distance, conflict, assignment, gene_id,  sep="\t",file=fout)
+              annotation, distance, conflict, assignment, gene_id, overlap, sep="\t",file=fout)
         if (seq_id, start, end) in antisense_scores:
             print(seq_id, start, end,
                   antisense_names[(seq_id, start, end)], antisense_scores[(seq_id, start, end)], {"+":"-","-":"+"}[s],
-                  annotation, distance, {"concordant":"discordant","discordant":"concordant","unknown":"unknown"}[conflict], assignment, gene_id, sep="\t",file=fout)
+                  annotation, distance, {"concordant":"discordant","discordant":"concordant","unknown":"unknown"}[conflict], assignment, gene_id, overlap, sep="\t",file=fout)
              
     fout.close()
     logger.info("all done .")
