@@ -125,6 +125,7 @@ sort -k1,1 -k2,2n -o examples/e.coli/genes.bed examples/e.coli/genes.bed
 <div align="center">
 <img src="./imgs/annotation.png" width="700px">
 </div>
+
 ```bash
 scripts/annotate-intervals.py --gene examples/e.coli/genes.bed --bed examples/e.coli/TPE.bed --contig examples/e.coli/genome.fna.fai --output examples/e.coli/TPE.annotated.bed
 scripts/annotate-intervals.py --gene examples/e.coli/genes.bed --bed examples/e.coli/TPE.RUT.bed --contig examples/e.coli/genome.fna.fai --output examples/e.coli/TPE.RUT.annotated.bed
