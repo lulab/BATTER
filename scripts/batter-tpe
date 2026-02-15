@@ -1,0 +1,218 @@
+#!/usr/bin/env python
+import argparse
+import os
+import sys
+import pandas as pd
+import numpy as np
+import torch
+from itertools import product
+from model import TerminatorTagger, MLM
+from dataset import tokenize, collate
+from torch.nn import functional as F
+import logging
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(name)s] %(message)s')
+logger = logging.getLogger("tagging terminators")
+from collections import defaultdict
+import subprocess
+from pyfaidx import Fasta
+import constants
+constants.init(1)
+
+
+exedir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+
+
+def tagging(batched_tokens, model, nbest=2, temperature=1):
+    logits = model(batched_tokens)[0]
+    attention_mask = (batched_tokens != constants.tokens_to_id[constants.pad_token]).int()
+    tags, scores = model.crf.decode(logits, attention_mask, nbest=nbest)
+    tags = tags.cpu().detach().numpy()
+    probs = F.softmax(logits/temperature,-1)[:,:,1].cpu().detach().numpy()
+    # tags: shape (nbest, batch_size, seq_length)
+    # probs: batch size, seq_length
+    return tags, probs
+
+def rle(inarray):
+        # adapted from https://stackoverflow.com/questions/1066758/find-length-of-sequences-of-identical-values-in-a-numpy-array-run-length-encodi 
+        """ run length encoding. Partial credit to R rle function. 
+            Multi datatype arrays catered for including non Numpy
+            returns: tuple (runlengths, startpositions, values) """
+        ia = np.asarray(inarray)                # force numpy
+        n = len(ia)
+        if n <= 1: 
+            return (None, None, None)
+        else:
+            y = ia[1:] != ia[:-1]               # pairwise unequal (string safe)
+            i = np.append(np.where(y), n - 1)   # must include last element posi
+            z = np.diff(np.append(-1, i))       # run lengths
+            p = np.cumsum(np.append(0, z))[:-1] # positions
+            return(z, p, ia[i])
+
+def update_predictions(tags, probs, ivs, min_length = 32):
+    # (nbest, batch size, seq length)
+    for i in range(tags.shape[0]):
+        seq_id, s, e, strand = ivs[i]
+        ls, ps, vs = rle(tags[i,:])
+        for l, p, v in zip(ls, ps, vs):
+            if l is None:
+                continue
+            if l < min_length:
+                continue
+            if v == 1:
+                if strand == "+":
+                    start, end = s+p, s+p+l
+                else:
+                    start, end = e-p-l + 1, e-p
+                if start < 0:
+                    logger.warning("some thing goes wrong with {s} {e} {l} {p} {v}")
+                    continue
+                score = probs[i,p:p+l].mean()
+                iv = (seq_id, start, end, strand)
+                predictions[iv].append(score)
+
+
+def clear_cached_predictions(fout):
+    ivs = sorted(list(predictions.keys()),key = lambda x:(x[0],x[1]))
+    for seq_id, start, end, strand in ivs:
+        scores = predictions[(seq_id, start, end, strand)]
+        scores = ",".join(np.round(np.array(scores),3).astype(str))
+        print(seq_id, start, end, "." , scores, strand, sep="\t", file=fout) 
+    fout.flush()
+    predictions.clear()
+
+
+def inference(tagger, batched_tokens, batched_ivs, nbest = 2, device = "cpu", temperature=1.0):
+    batched_tokens = collate(batched_tokens)
+    batched_tokens = batched_tokens.to(device)
+    tags, probs = tagging(batched_tokens, tagger, nbest, temperature) 
+    # shape of tags is (nbest, batch_size, seq_length)
+    # iterate top k state paths
+    for i in range(tags.shape[0]):
+        # 1: means here we skip the prepended <cls> token
+        update_predictions(tags[i,:,1:], probs[:,1:], batched_ivs)
+
+kmers = ["".join(c) for c in product(*["ACGT"]*4)]
+def get_TNF(sequence,pseudocount=0.1):
+    counter = defaultdict(int)
+    total = 0
+    for i in range(len(sequence)-4):
+        kmer = sequence[i:i+4]
+        counter[kmer] += 1
+        total += 1
+    fractions = []
+    total += len(kmers)*pseudocount
+    for kmer in kmers:
+        fraction = 100*(counter[kmer]+pseudocount)/total
+        fractions.append(round(fraction,5))
+    fractions = np.array(fractions).reshape(1,-1) 
+    return fractions
+
+def get_closest_bin(tnf,tnfs):
+    diff = tnfs.values - tnf
+    distances = (diff*diff).sum(axis=1)
+    return str(tnfs.index[np.argmin(distances)]).zfill(2)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='tagging terminator in input sequences')
+    parser.add_argument('--encoder-config','-ec',default="config/64.8.256.4.json", help="model configuration")
+    parser.add_argument('--fasta','-f',type=str,required=True,help="Input genome sequences")
+    parser.add_argument('--batch-size','-bs',type=int,default=128,help="Batch size for scanning")
+    parser.add_argument('--device','-d',default="cuda:0",choices=["cuda:0","cuda:1","cuda:2","cuda:3","cpu"],help="Device to run the model")
+    parser.add_argument('--model','-m',default="model/batter.mdl.pt",type=str,help="Where to load the model parameters")
+    parser.add_argument('--window-size','-w',type=int,default=500,help="window size for scanning")
+    parser.add_argument('--stride','-s',type=int,default=100,help="stride for scanning")
+    parser.add_argument('--output','-o',required=True,type=str,help="path to save plus strand score in bed format")
+    parser.add_argument('--no-reverse-complement','-nrc',action="store_true",help="whether consider both strand. only consider forward strand by default")
+    parser.add_argument('--tmp-file','-tf',type=str,help="where to save temperatory file")
+    parser.add_argument('--keep-tmp','-kt',action="store_true",help="whether keep temporatory file")
+    parser.add_argument('--top-k','-k',type=int,default = 10,help="number of state path to return")
+    parser.add_argument('--verbose','-v',action="store_true", help="whether use verbose output")
+    parser.add_argument('--tnfs',default="model/TNF-by-clusters.txt", help="TNF freqency to loopup for FPR calibration")
+    args = parser.parse_args()
+
+    logger.info("Initialize the model ...")
+    tagger = TerminatorTagger(MLM(os.path.join(exedir,args.encoder_config)).encoder)
+    logger.info(f"Load model paramters from {args.model} ...")
+    state_dict = torch.load(os.path.join(exedir,args.model),map_location = args.device)
+    tagger.load_state_dict(state_dict)
+    tagger = tagger.eval()
+
+    logger.info(f"Will use {args.device} for inference ...")
+    tagger.to(args.device)    
+
+    logger.info(f"Load sequences from {args.fasta} ...")
+    sequences = Fasta(args.fasta)
+
+    logger.info("Load TNF table ...")
+    tnfs = pd.read_csv(os.path.join(exedir,args.tnfs),sep="\t",index_col=0).loc[:,kmers]
+
+    tmp_path = args.tmp_file if args.tmp_file is not None else f"{args.output}.tmp"
+    logger.info(f"Intermediate result will be saved to {tmp_path} ...")
+    fout = open(tmp_path, "w")
+
+    nbase = 0
+    batched_tokens = []
+    batched_ivs = []
+
+    
+    global predictions
+    predictions = defaultdict(list)
+
+    lut_path = args.tmp_file + ".lut" if args.tmp_file is not None else f"{args.output}.tmp.lut"
+    flut = open(lut_path,"w")
+    for seq_id in sequences.keys():
+        sequence = sequences[seq_id][::]    
+        tnf = get_TNF(str(sequence)) 
+        binidx = get_closest_bin(tnf,tnfs)
+        print(seq_id, binidx,sep="\t", file=flut)
+        if args.verbose:
+            logger.info(f"processing {seq_id} with {binidx} for FPR assignment...")
+        p = 0
+        while p < len(sequence):
+            s = p # start location of this chunk
+            e = min(p + args.window_size,len(sequence)) # end location of this chunk
+            batched_ivs.append((seq_id, s, e, "+"))
+            chunked_sequence = sequence[s:e]
+            # we always use RNA alphabet
+            tokens = tokenize(str(chunked_sequence).upper().replace("T","U"))
+            batched_tokens.append(tokens)
+            if not args.no_reverse_complement:
+                # if consider the reverse strand
+                tokens = tokenize(str(chunked_sequence.reverse.complement).upper().replace("T","U"))
+                batched_tokens.append(tokens)
+                batched_ivs.append((seq_id, s, e, "-"))
+            p += args.stride
+            nbase += args.stride
+            if nbase%50000 == 0:
+                logger.info(f"{int(nbase/1000)} K bases processed .")
+            # make a inference when instances accumulate to specified batch size
+            if len(batched_tokens) == args.batch_size:
+                inference(tagger, batched_tokens, batched_ivs, args.top_k, args.device) #, args.temperature)
+                batched_tokens = [] # clean the batch list
+                batched_ivs = []
+        clear_cached_predictions(fout)
+    # make a inference for the last batch
+    if len(batched_tokens) > 0:
+        inference(tagger, batched_tokens, batched_ivs, args.top_k, args.device) #, args.temperature)
+        clear_cached_predictions(fout)
+    fout.close()
+    flut.close()
+    
+    logger.info("Sort predictions ...")
+    subprocess.run(["sort", "-k1,1", "-k2,2n", "-o", tmp_path, tmp_path])
+
+    logger.info("Merge predictions ...")
+    logger.info(f"Final results will be saved to {args.output} .")
+    subprocess.run([os.path.join(exedir,"scripts/pick-local-max.py"), "-i", tmp_path, "-o", args.output,'-l',lut_path])
+    if not args.keep_tmp:
+        logger.info("Remove temporary results ...")
+        os.remove(tmp_path)
+        os.remove(lut_path)
+
+    logger.info("all done .")
+    
+
+
+if __name__ == "__main__":
+    main()

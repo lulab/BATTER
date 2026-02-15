@@ -1,0 +1,200 @@
+#!/usr/bin/env python
+from collections import defaultdict
+from pyfaidx import Fasta
+import pandas as pd
+import numpy as np
+from itertools import product
+import os
+from RUT import select_candidates, get_picked_locations, energy, scoring, extract_features
+import re
+import logging
+import argparse
+import json
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(name)s: %(message)s')
+logger = logging.getLogger('RUT predicion')
+import subprocess
+
+
+kmers = ["".join(c) for c in product(*["ACGT"]*4)]
+def get_TNF(sequence,pseudocount=0.1):
+    counter = defaultdict(int)
+    total = 0
+    for i in range(len(sequence)-4):
+        kmer = sequence[i:i+4]
+        counter[kmer] += 1
+        total += 1
+    fractions = []
+    total += len(kmers)*pseudocount
+    for kmer in kmers:
+        fraction = 100*(counter[kmer]+pseudocount)/total
+        fractions.append(round(fraction,5))
+    fractions = np.array(fractions).reshape(1,-1)
+    return fractions
+
+def get_closest_bin(tnf,tnfs):
+    diff = tnfs.values - tnf
+    distances = (diff*diff).sum(axis=1)
+    return str(tnfs.index[np.argmin(distances)]).zfill(2)
+
+exedir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+def main():
+    parser = argparse.ArgumentParser(description='Genome wide prediction of rho binding sites')
+    parser.add_argument('--input','-i',type=str,required=True, help='input genomic sequences')
+    parser.add_argument('--intervals','-ivs',type=str, help='input intervals to consider')
+    parser.add_argument('--left-slop',type=int, default=100, help='input intervals at left side')
+    parser.add_argument('--right-slop',type=int, default=100, help='input intervals at right side')
+    parser.add_argument('--output','-o',type=str, required=True, help = 'output predictions')
+    parser.add_argument('--stride','-s',type=int, default=40, help = 'stride size')
+    parser.add_argument('--window','-w',type=int, default=100, help = 'window size')
+    parser.add_argument('--beam-size','-bs',type=int, default=500, help = 'top k to consider in beam search')
+    parser.add_argument('--CG-cutoff','-cgc',type=int, default=1, help = 'filter windows with C/G ratio greater than this value')
+    parser.add_argument('--YC-cutoff','-ycc',type=int, default=4, help = 'only consider windows with YC dimer count greater than this value')
+    parser.add_argument('--filter-cutoff','-fc',type=float, default=3, help = 'cutoff for initial filtering')
+    parser.add_argument('--score-cutoff','-sc',type=int, default=0, help = 'cutoff for rescoring')
+    parser.add_argument('--initial-scoring-rule','-isr',type=str, default = os.path.join(exedir,"model/scoring.json"), help = 'scoring rule for YC hexmer detection')
+    parser.add_argument('--secondary-scoring-rule','-ssr',type=str, default = os.path.join(exedir,"model/scoring2.json"), help = 'a secondary logistsic regression based scoring rule')
+    parser.add_argument('--save-YC-positions','-syp', action="store_true", help = 'wether dump YC locations')
+    parser.add_argument('--no-reverse-complementary','-nrc', action="store_true", help = 'if specified, not scan bottom strand')
+    parser.add_argument('--fprs','-f',default="model/RUT-FPR-by-clusters.txt",help="fprs lookup table")
+    parser.add_argument('--tnfs',default="model/TNF-by-clusters.txt", help="TNF freqency to loopup for FPR calibration")
+    args = parser.parse_args()    
+
+    logger.info(f"Processing {args.input} ...")
+    fout = open(args.output,"w")
+    fasta = Fasta(args.input)
+
+    logger.info("Load intial scoring rules ...")
+    params0 = json.loads(open(args.initial_scoring_rule).read())
+    print(params0)
+    logger.info("Load secondary scoring rules ...")
+    params1 = json.loads(open(args.secondary_scoring_rule).read())
+    print(params1)
+    
+    logger.info("Load TNF table ...")
+    tnfs = pd.read_csv(os.path.join(exedir,args.tnfs),sep="\t",index_col=0).loc[:,kmers]
+
+    logger.info("Load FPR table ...")
+    fprs = pd.read_csv(os.path.join(exedir,args.fprs),sep="\t",index_col=0)
+
+    lut = {}
+    logger.info("Get closest bin assignment ...")
+    for seq_id in fasta.keys():
+        sequence = str(fasta[seq_id][::])
+        tnf = get_TNF(sequence,pseudocount=0.1) 
+        binidx = get_closest_bin(tnf,tnfs)
+        lut[seq_id] = binidx
+
+    intervals = {}
+    if args.intervals is not None:
+        logger.info("Regions to search specified. Load intervals ...")
+        with open(args.intervals) as f:
+            for line in f:
+                line = line.strip()
+                if len(line) == 0:
+                    continue
+                fields = line.split("\t")
+                seq_id, start, end = fields[:3]
+                start, end = int(start), int(end)
+                strand = fields[5]
+                if seq_id not in intervals:
+                    intervals[seq_id] = []
+                if strand == "+":
+                    start -= args.left_slop
+                    end += args.right_slop
+                else:
+                    start -= args.right_slop
+                    end += args.left_slop
+                start = max(0,start)
+                end = min(len(fasta[seq_id]),end)
+                intervals[seq_id].append((start,end,strand))
+    else:
+        logger.info("Regions to search not specified. Search all input sequences ...")
+        for seq_id in fasta.keys():
+            intervals[seq_id] = []
+            for strand in ["+","-"]:
+                if (strand == "-") and args.no_reverse_complementary:
+                    continue
+                intervals[seq_id].append((0,len(fasta[seq_id]),strand))
+
+    # current index of the terminator
+    rdt_index = 0
+    cached_ivs = set()
+
+    nregions = 0    
+    nbases = 0
+    for seq_id in intervals:
+        logger.info(f"Processing {seq_id} ...")
+        sequence = fasta[seq_id]
+        for region_start, region_end, region_strand in intervals[seq_id]:
+            nregions += 1
+            if (args.intervals is not None) and ((nregions+1)%500 == 0):
+                logger.info(f"{(nregions+1)/1000} K regions processed .")
+            p = region_start
+            while p + args.window < region_end:
+                if (args.intervals is None) and ((nbases + 1)/100000 == 0):
+                    logger.info(f"{(nbases + 1)/1000000} M bases processed .")
+                segment = sequence[p:p+args.window]
+                segment = str(segment).replace("T","U")
+                # select candidates with beam search
+                # process top strand
+                if region_strand == "+":
+                    for score0, state, locations in select_candidates(segment, params0, k=args.beam_size, YC_cutoff = args.YC_cutoff, CG_cutoff = args.CG_cutoff, filter_cutoff = args.filter_cutoff):
+                    # score0 is the initial scoring
+                        start0, end0 = locations[0] - 10, locations[-1]
+                        if start0 > 0:                    
+                            candidate = segment[start0:end0]
+                            start, end = start0 + p , end0 + p
+                            # skip  duplicated entries
+                            if (seq_id, start, end, "+") in cached_ivs:
+                                continue
+                            cached_ivs.add((seq_id, start, end, "+"))
+                            features = extract_features(candidate)
+                            score = scoring(features,params1)
+                            if score < args.score_cutoff:
+                                continue                  
+                            level = int(score*100)
+                            fpr = round(fprs.loc[level,lut[seq_id]],5)                 
+                            if not args.save_YC_positions:               
+                                print(seq_id,start, end, "RUT" + str(rdt_index).zfill(8), score,"+", score0, fpr, sep="\t",file=fout)
+                            else:
+                                YC_positions = np.array(locations) + p
+                                print(seq_id,start, end,"RUT" + str(rdt_index).zfill(8),score,"+", score0, fpr, *YC_positions, sep="\t",file=fout)
+                            rdt_index += 1
+                else:
+                # reverse strand
+                    segment = sequence[p:p+args.window].reverse.complement
+                    segment = str(segment).replace("T","U")
+                    for score0, state, locations in select_candidates(segment, params0, k=args.beam_size, YC_cutoff = args.YC_cutoff, CG_cutoff = args.CG_cutoff, filter_cutoff = args.filter_cutoff):
+                        start0, end0 = locations[0] - 10, locations[-1]
+                        if start0 > 0:
+                            candidate = segment[start0:end0]
+                            start, end = p+args.window - end0, p+args.window - start0
+                            if (seq_id, start, end, "-") in cached_ivs:
+                                continue
+                            cached_ivs.add((seq_id, start, end, "-"))
+                            features = extract_features(candidate)
+                            score = scoring(features,params1)
+                            if score < args.score_cutoff:
+                                continue                    
+                            level = int(score*100)
+                            fpr = round(fprs.loc[level,lut[seq_id]],5)
+                            if not args.save_YC_positions:
+                                print(seq_id,start, end,"RUT" + str(rdt_index).zfill(8),score,"-", score0, fpr, sep="\t",file=fout)
+                            else:
+                                YC_positions = p + args.window - np.array(locations)
+                                print(seq_id,start, end,"RUT" + str(rdt_index).zfill(8),score,"-", score0, fpr, *YC_positions, sep="\t",file=fout)
+                            rdt_index += 1
+                p += args.stride
+                nbases += args.stride
+                fout.flush()
+    fout.close()           
+
+    logger.info(f"Sorting output ...")
+    subprocess.run(["sort","-k1,1","-k2,2n","-o",args.output,args.output])
+
+    logger.info("All done.")
+     
+    
+if __name__ == "__main__":
+    main()
+
