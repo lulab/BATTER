@@ -28,16 +28,17 @@ git clone https://github.com/lulab/BATTER
 ```
 
 
-### Automatic installation of the dependency
+### Automatic installation of the dependency (recommended)
 
-- We recommand to use conda for installation of the dependency
+- We recommend to use conda for installation of the dependency
 - After installing [conda](https://docs.conda.io/en/latest/), type:
  
 ```{bash}
-# by default a conda env called batter-env will be created
-# if you want to use alternative name, simply edit the name field in environment.yml
 conda env create -f environment.yml
 ```
+
+- by default a conda env called batter-env will be created
+- if you want to use alternative name, simply edit the name field in `environment.yml`
 
 ### Manual installation of the dependency
 
