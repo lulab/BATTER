@@ -19,6 +19,15 @@
 
 ## Installation
 
+### Download
+
+- Download this repo:
+
+```bash
+git clone https://github.com/lulab/BATTER 
+```
+
+
 ### Automatic installation of the dependency
 
 - We recommand to use conda for installation of the dependency
@@ -42,14 +51,6 @@ conda env create -f environment.yml
 - The following tools are optional:
   - [bedtools](https://bedtools.readthedocs.io/), for annotation of predictions
 
-
-### Download
-
-- After installing the dependencies, you can install BATTER by simply cloning this repo:
-
-```bash
-git clone https://github.com/lulab/BATTER 
-```
 
 ## Usage
 
