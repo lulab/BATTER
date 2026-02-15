@@ -19,37 +19,28 @@
 
 ## Installation
 
-### Dependency
+### Automatic installation of the dependency
 
+- We recommand to use conda for installation of the dependency
+- After installing [conda](https://docs.conda.io/en/latest/), type:
+ 
+```{bash}
+# by default a conda env called batter-env will be created
+# if you want to use alternative name, simply edit the name field in environment.yml
+conda env create -f environment.yml
+```
+
+### Manual installation of the dependency
+
+- You can also manually install each of the packages if you want
 - The following python packages are required:
   - [pytorch](https://pytorch.org/): test on version `1.7.0+cu110`, other version should work
   - [transformers](https://huggingface.co/docs/transformers/index): version `4.18.0`
   - [pyfaidx](https://pythonhosted.org/pyfaidx/): test on version `0.7.1`
+  - [pandas](https://pandas.pydata.org/): test on version `2.0.3`
 
 - The following tools are optional:
   - [bedtools](https://bedtools.readthedocs.io/), for annotation of predictions
-
-- We recommend using [miniforge](https://github.com/conda-forge/miniforge) to install the dependency. 
-- After installing miniforge (please refer to instruction [here](https://github.com/conda-forge/miniforge?tab=readme-ov-file#install) ), you can create a new environment and activate it:
-
-```bash
-# create a new environment called batter-env
-mamba create -n batter-env
-# activate the environment
-mamba activate batter-env
-```
-
-- Then you can install the dependencies:
-
-```bash
-# install required packages:
-mamba install -c pytorch pytorch==1.7.0
-mamba install -c conda-forge transformers==4.18.0
-mamba install -c bioconda pyfaidx==0.7.1
-
-# install optional packages if you need them:
-mamba install -c bioconda bedtools
-```
 
 ### Download
 
