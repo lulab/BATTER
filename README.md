@@ -42,6 +42,7 @@ conda env create -f environment.yml
 - The following tools are optional:
   - [bedtools](https://bedtools.readthedocs.io/), for annotation of predictions
 
+
 ### Download
 
 - After installing the dependencies, you can install BATTER by simply cloning this repo:
@@ -66,6 +67,8 @@ git clone https://github.com/lulab/BATTER
 # The following command takes around 2 min to finish on a nvidia V100 GPU.
 scripts/batter-tpe --fasta examples/e.coli/genome.fna --output examples/e.coli/TPE.bed --device cuda:0
 ```
+
+- If you get error 'libtorch_cpu.so: undefined symbol: iJIT_IsProfilingActive', this is likely result from a discrepancy between version of pytorch and mkl (It can happen when using manual installation and the dependency is not correctly resolved), considering down grade mkl by running `conda install mkl=2023 mkl-include=2023 -c conda-forge`
 
 - The output has 7 fields (the 1-6 columns are in standard bed format)
   1. contig / chromosome name
